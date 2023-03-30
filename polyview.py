@@ -23,6 +23,8 @@ class Polyhedron:
     def __init__(self,A,b):
         A=np.array(A)
         b=np.array(b).reshape(-1,1)
+        self.A=A
+        self.b=b
         self.cdd_poly=self._get_polyhedron(A,b)
         self.vertices=self._get_vertices()
         self.edges=self._get_edges()
@@ -97,6 +99,31 @@ def colour_face(fig,face_vxs,face_num=-1,color="lightpink",visible=True,name=Non
         fig.add_trace(go.Mesh3d(x=jitter_vxs[:,0],y=jitter_vxs[:,1],z=jitter_vxs[:,2],color=color,hoverinfo="skip",
                             opacity=0.5, alphahull=0,flatshading=True,name=name,visible=visible))
 
+def normalise(vec):
+    return vec/np.linalg.norm(vec)
+
+def compute_affine_basis(a,beta,scale=1000):
+    a=np.array(a).reshape(1,-1)
+    beta=np.array(beta).reshape(-1)
+    x,_,_,_=np.linalg.lstsq(a,beta,rcond=None)
+    a=a.flatten()
+    for i in range(3):
+        if a[i]!=0:
+            break
+    vecs=[np.eye(3)[j] for j in range(3) if j!=i]
+    a_normalised=normalise(a)
+    u=vecs[0]-np.inner(a_normalised,vecs[0])*a_normalised
+    u=normalise(u)
+    w=vecs[1]-np.inner(a_normalised,vecs[1])*a_normalised-np.inner(u,vecs[1])*u
+    w=normalise(w)
+    return np.array([x+scale*u,x+scale*w,x-scale*(u+w)])
+
+def setup_ineq_planes(fig,poly,color="lightpink"):
+    for i in range(poly.m):
+        B=compute_affine_basis(poly.A[i],poly.b.flatten()[i])
+        fig.add_trace(go.Mesh3d(x=B[:,0],y=B[:,1],z=B[:,2],color=color,hoverinfo="skip",
+                            opacity=0.5,flatshading=True,i=[0],j=[1],k=[2],visible=False,name="plane_"+str(i)))
+        
 def plot_opt_path(fig,opt_path):
     opt_path=np.array(opt_path)
     #fig.add_trace(go.Scatter3d(x=opt_path[:,0],y=opt_path[:,1],z=opt_path[:,2],mode="lines",hoverinfo="skip",line=dict(width=10,color="red"),
@@ -109,7 +136,7 @@ def plot_opt_path(fig,opt_path):
         
     
         
-def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False):
+def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_planes=False):
     if objective_vec is not None:
         text=objective_text(vxs,objective_vec)
     else:
@@ -124,6 +151,8 @@ def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False):
     if face_traces:
         for face_num in range(poly.m):
             highlight_face(poly,face_num,fig,visible=False)
+    if ineq_planes:
+        setup_ineq_planes(fig,poly)
     xrange=compute_range(poly.vertices,0)
     yrange=compute_range(poly.vertices,1)
     zrange=compute_range(poly.vertices,2)
@@ -132,7 +161,7 @@ def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False):
         height=800,
         autosize=False,
         showlegend=False, 
-        scene = dict(xaxis = dict(range=xrange), yaxis = dict(range=yrange), zaxis = dict(range=zrange)    ),
+        scene = dict(xaxis = dict(range=xrange), yaxis = dict(range=yrange), zaxis = dict(range=zrange),aspectmode="cube"    ),
         paper_bgcolor="LightSteelBlue",
             margin=dict(
                 l=10,
@@ -179,7 +208,7 @@ def setup_poly_viewer(A,b,*kwargs):
     poly=Polyhedron(A,b)
     out=widgets.Output(layout={'border':'6px solid LightSteelBlue','width': '90%', 
                 'height': '60px',})
-    fig=plot_poly(poly,face_traces=True)
+    fig=plot_poly(poly,face_traces=True,ineq_planes=True)
     fig_widget=go.FigureWidget(fig)
     m,n=poly.m,poly.n
     buttons=[
@@ -190,7 +219,6 @@ def setup_poly_viewer(A,b,*kwargs):
             indent=False
         ) for i in range(m)
     ]
-
     def face_output(face_num):
         num_vxs_in_face=len(poly.face_vxs[face_num])
         if num_vxs_in_face==0:
@@ -206,9 +234,14 @@ def setup_poly_viewer(A,b,*kwargs):
         def on_check(event):
             with fig_widget.batch_update():
                 for trace in fig_widget.data:
-                    if trace.name[:4]=="face":
-                        if int(trace.name[5:])==ineq_num:
-                            trace.update(visible=event.new)
+                    if show_planes:
+                        if trace.name[:5]=="plane":
+                            if int(trace.name[6:])==ineq_num:
+                                trace.update(visible=event.new)
+                    else:
+                        if trace.name[:4]=="face":
+                            if int(trace.name[5:])==ineq_num:
+                                trace.update(visible=event.new)
             out.clear_output()
             with out:
                 if event.new:
@@ -220,13 +253,38 @@ def setup_poly_viewer(A,b,*kwargs):
 
     for i,button in enumerate(buttons):
         button.observe(on_check_factory(i),"value")
+        
+    toggle_button=widgets.ToggleButton(
+        value=False,
+        description='full plane',
+        disabled=False,
+        button_style='', # 'success', 'info', 'warning', 'danger' or ''
+        tooltip='toggles between full plan or intersection with polytope',
+        #icon='check' # (FontAwesome names without the `fa-` prefix)
+    )
+    show_planes=False
+
+    def reset_all():
+        with fig_widget.batch_update():
+            for trace in fig_widget.data:
+                if trace.name[:5]=="plane" or trace.name[:4]=="face":
+                    trace.update(visible=False)
+        for btn in buttons:
+            btn.value=False
+    
+    def toggle_action(event):
+        nonlocal show_planes
+        show_planes=event.new
+        reset_all()
+    
+    toggle_button.observe(toggle_action,"value")
 
     explainer=widgets.HTML(
         value="Select inequalities to highlight intersection",
         placeholder='Some HTML',
         #description='Some HTML',
     )    
-    vbox=widgets.VBox([explainer]+buttons+[out])
+    vbox=widgets.VBox([explainer]+[toggle_button]+buttons+[out])
     hbox=widgets.HBox([fig_widget,vbox])
     with out:
         print("no inequality selected")
