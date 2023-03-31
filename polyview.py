@@ -20,16 +20,26 @@ def find_face_vxs(vxs,poly,face_num,eps=1E-8):
     return np.array(face_vxs)
 
 class Polyhedron:
-    def __init__(self,A,b):
+    def __init__(self,A,b,enclose_factor=1000):
         A=np.array(A)
         b=np.array(b).reshape(-1,1)
         self.A=A
         self.b=b
+        if enclose_factor>0:
+            upper_bounds_A=np.eye(3)
+            upper_bounds_b=enclose_factor*(np.ones(3).reshape(-1,1))
+            lower_bounds_A=-np.eye(3)
+            lower_bounds_b=enclose_factor*(np.ones(3).reshape(-1,1))
+            A=np.vstack([A,upper_bounds_A,lower_bounds_A])
+            b=np.vstack([b,upper_bounds_b,lower_bounds_b])
         self.cdd_poly=self._get_polyhedron(A,b)
         self.vertices=self._get_vertices()
         self.edges=self._get_edges()
-        self.m,self.n=A.shape
+        self.m,self.n=self.A.shape
         self.face_vxs=[find_face_vxs(self.vertices,self.cdd_poly,face_num) for face_num in range(self.m)]
+        
+    def get_range(self):
+        return np.array([np.min(self.vertices,axis=0),np.max(self.vertices,axis=0)]).T
         
     def _get_polyhedron(self,A,b):
         matrix=cdd.Matrix(H_rep(A,b))
@@ -38,6 +48,8 @@ class Polyhedron:
     
     def _get_vertices(self):
         generators=np.array(self.cdd_poly.get_generators())
+        if len(generators)==0:
+            raise Exception("polyhedron empty!")
         vertices=generators[generators[:,0]==1]
         vertices=vertices[:,1:]
         if len(vertices)!=len(generators):
@@ -70,11 +82,11 @@ def objective_text(vertices,objective_vec):
 def highlight_face(poly,face_num,fig,visible=True):
     colour_face(fig,poly.face_vxs[face_num],face_num=face_num,visible=visible)
     
-def compute_range(vxs,axis_num):
-    ax_min,ax_max=min(vxs[:,axis_num]),max(vxs[:,axis_num])
-    spread=ax_max-ax_min
-    offset=spread*0.2
-    return [ax_min-offset,ax_max+offset]
+def compute_range(poly):
+    R=poly.get_range()
+    spread=R[:,1]-R[:,0]
+    offset=0.2*spread
+    return np.array([R[:,0]-offset,R[:,1]+offset]).T
 
 def colour_face(fig,face_vxs,face_num=-1,color="lightpink",visible=True,name=None):
     if name is not None:
@@ -136,26 +148,16 @@ def plot_opt_path(fig,opt_path):
         
     
         
-def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_planes=False):
+def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_planes=False,**kwargs):
     if objective_vec is not None:
         text=objective_text(vxs,objective_vec)
     else:
         text=None
     fig = go.Figure()
-    fig.add_trace(go.Scatter3d(x=poly.vertices[:,0],y=poly.vertices[:,1],z=poly.vertices[:,2],mode="markers",text=text))
-    for edge in poly.edges:
-        fig.add_trace(go.Scatter3d(x=edge[:,0],y=edge[:,1],z=edge[:,2],marker=dict(size=0), line=dict(width=5,color="blue"),hoverinfo="skip"))
-    if opt_path is not None:
-        plot_opt_path(fig,opt_path)
-    colour_face(fig,poly.vertices,color="lightblue",name="whole_poly")
-    if face_traces:
-        for face_num in range(poly.m):
-            highlight_face(poly,face_num,fig,visible=False)
-    if ineq_planes:
-        setup_ineq_planes(fig,poly)
-    xrange=compute_range(poly.vertices,0)
-    yrange=compute_range(poly.vertices,1)
-    zrange=compute_range(poly.vertices,2)
+    if "range" in kwargs:
+        xrange,yrange,zrange=kwargs["range"]
+    else:
+        xrange,yrange,zrange=compute_range(poly)
     fig.update_layout(
         width=800,
         height=800,
@@ -171,6 +173,17 @@ def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_plane
                 pad=4
             ),
     )
+    fig.add_trace(go.Scatter3d(x=poly.vertices[:,0],y=poly.vertices[:,1],z=poly.vertices[:,2],mode="markers",text=text))
+    for edge in poly.edges:
+        fig.add_trace(go.Scatter3d(x=edge[:,0],y=edge[:,1],z=edge[:,2],marker=dict(size=0), line=dict(width=5,color="blue"),hoverinfo="skip"))
+    if opt_path is not None:
+        plot_opt_path(fig,opt_path)
+    colour_face(fig,poly.vertices,color="lightblue",name="whole_poly")
+    if face_traces:
+        for face_num in range(poly.m):
+            highlight_face(poly,face_num,fig,visible=False)
+    if ineq_planes:
+        setup_ineq_planes(fig,poly)
     #fig.show()
     return fig
 
@@ -204,11 +217,14 @@ def ineq_string(A,b,ineq_num):
     beta=np.array(b).flatten()[ineq_num]
     return "{}x{}y{}z <= {}".format(round(a[0],2),with_sign(a[1]),with_sign(a[2]),round(beta,2))
 
-def setup_poly_viewer(A,b,*kwargs):
-    poly=Polyhedron(A,b)
+def setup_poly_viewer(A,b,*args,**kwargs):
+    if "enclose_factor" in kwargs:
+        poly=Polyhedron(A,b,enclose_factor=kwargs["enclose_factor"])
+    else:
+        poly=Polyhedron(A,b)
     out=widgets.Output(layout={'border':'6px solid LightSteelBlue','width': '90%', 
                 'height': '60px',})
-    fig=plot_poly(poly,face_traces=True,ineq_planes=True)
+    fig=plot_poly(poly,face_traces=True,ineq_planes=True,**kwargs)
     fig_widget=go.FigureWidget(fig)
     m,n=poly.m,poly.n
     buttons=[
