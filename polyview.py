@@ -1,5 +1,5 @@
 
-import cdd # pycddlib
+#import cdd # pycddlib
 import numpy as np
 import plotly.graph_objects as go
 import math
@@ -8,63 +8,91 @@ import simplex
 
 ###################### compute vertices and edges of polyhedron ##################
 
-def H_rep(A,b):
-    return np.hstack([b,-A])
-
-def find_face_vxs(vxs,poly,face_num,eps=1E-8):
-    ineq=np.array(poly.get_inequalities())[face_num]
-    face_vxs=[]
-    for vx in vxs:
-        if np.abs(ineq[0]+np.sum(ineq[1:]*vx))<eps:
-            face_vxs.append(vx)
-    return np.array(face_vxs)
-
 class Polyhedron:
-    def __init__(self,A,b,enclose_factor=1000):
+    def __init__(self,A,b,enclose_factor=1000,eps=1E-8):
         A=np.array(A)
         b=np.array(b).reshape(-1,1)
         self.A=A
         self.b=b
+        self.eps=eps
         if enclose_factor>0:
             upper_bounds_A=np.eye(3)
             upper_bounds_b=enclose_factor*(np.ones(3).reshape(-1,1))
             lower_bounds_A=-np.eye(3)
             lower_bounds_b=enclose_factor*(np.ones(3).reshape(-1,1))
-            A=np.vstack([A,upper_bounds_A,lower_bounds_A])
-            b=np.vstack([b,upper_bounds_b,lower_bounds_b])
-        self.cdd_poly=self._get_polyhedron(A,b)
-        self.vertices=self._get_vertices()
-        self.edges=self._get_edges()
+            self.A=np.vstack([A,upper_bounds_A,lower_bounds_A])
+            self.b=np.vstack([b,upper_bounds_b,lower_bounds_b])
         self.m,self.n=self.A.shape
-        self.face_vxs=[find_face_vxs(self.vertices,self.cdd_poly,face_num) for face_num in range(self.m)]
+        self._get_vertices()
+        self._get_edges()
+        self._set_up_face_vxs()
         
     def get_range(self):
+        """returns a list [xrange,yrange,zrange]"""
         return np.array([np.min(self.vertices,axis=0),np.max(self.vertices,axis=0)]).T
         
-    def _get_polyhedron(self,A,b):
-        matrix=cdd.Matrix(H_rep(A,b))
-        matrix.rep_type=cdd.RepType.INEQUALITY
-        return cdd.Polyhedron(matrix)
-    
+    def is_feasible(self,x):
+        return np.all(self.A@x.reshape(-1,1)-self.b.reshape(-1,1) <=self.eps)
+
+    def same_vx(self,x,y):
+        return np.all(np.abs(x-y)<=self.eps)
+
+    def _is_new_vx(self,x):
+        for v in self.vertices:
+            if self.same_vx(v,x):
+                return False
+        return True
+
     def _get_vertices(self):
-        generators=np.array(self.cdd_poly.get_generators())
-        if len(generators)==0:
-            raise Exception("polyhedron empty!")
-        vertices=generators[generators[:,0]==1]
-        vertices=vertices[:,1:]
-        if len(vertices)!=len(generators):
-            raise Exception("polyhedron unbounded!")
-        return vertices
+        self.vertices=[]
+        for i in range(self.m):
+            for j in range(i+1,self.m):
+                for k in range(j+1,self.m):
+                    AA=self.A[[i,j,k]]
+                    bb=self.b[[i,j,k]]
+                    try:
+                        x=np.linalg.solve(AA,bb).flatten()
+                        if self.is_feasible(x) and self._is_new_vx(x):
+                            self.vertices.append(x.flatten())
+                    except np.linalg.LinAlgError:
+                        pass
+        self.vertices=np.array(self.vertices)
         
-    def _get_edges(self):
-        edges=[]
-        for vx_index,neighbours in enumerate(self.cdd_poly.get_adjacency()):
-            for neighbour_index in neighbours:
-                if vx_index<neighbour_index: # don't add edges twice
-                    edges.append(np.array([self.vertices[vx_index],self.vertices[neighbour_index]]))
-        return edges
+    def is_in_face(self,FA,Fb,x):
+        return np.all(np.abs( FA@x.reshape(-1,1)-Fb.reshape(-1,1)) <=self.eps)
     
-        
+    def _is_new_edge(self,edge):
+        u,v=edge
+        for e in self.edges:
+            if self.same_vx(u,e[0]) and self.same_vx(v,e[1]):
+                return False
+            if self.same_vx(u,e[1]) and self.same_vx(v,e[0]):
+                return False
+        return True
+
+    def _get_edges(self):
+        self.edges=[]
+        for i in range(self.m):
+            for j in range(i+1,self.m):
+                AA=self.A[[i,j]]
+                bb=self.b[[i,j]]
+                if np.linalg.matrix_rank(AA)>=2:
+                    edge=[]
+                    for v in self.vertices:
+                        if self.is_in_face(AA,bb,v):
+                            edge.append(v)
+                    if len(edge)==2 and self._is_new_edge(edge):        
+                        self.edges.append(np.array(edge))
+                        
+    def _find_face_vxs(self,face_num):
+        FA=self.A[[face_num]]
+        Fb=self.b[[face_num]]
+        face_vxs=[vx for vx in self.vertices if self.is_in_face(FA,Fb,vx)]
+        return np.array(face_vxs)
+    
+    def _set_up_face_vxs(self):
+        self.face_vxs=[self._find_face_vxs(face_num) for face_num in range(self.m)]
+                
 
 ################### visualisation code #######################################
 
@@ -190,16 +218,6 @@ def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_plane
 def get_path(simplex):
     return [state.x.flatten() for state in simplex.record]
 
-def factory_plot(factory,plot_path=False,face_num=None):
-    A,b,c,x0=factory()
-    poly=get_polyhedron(A,b)
-    if plot_path:
-        simplex=Simplex(A,b,c,x0,verbose=True)
-        plot_poly(poly,objective_vec=c,opt_path=get_path(simplex),face_num=face_num)
-    else:
-        plot_poly(poly,face_num=face_num)-1
-        
-        
 def list_str(l):
     result="["
     for item in l:
@@ -226,14 +244,14 @@ def setup_poly_viewer(A,b,*args,**kwargs):
                 'height': '60px',})
     fig=plot_poly(poly,face_traces=True,ineq_planes=True,**kwargs)
     fig_widget=go.FigureWidget(fig)
-    m,n=poly.m,poly.n
+    #m,n=poly.m,poly.n
     buttons=[
         widgets.Checkbox(
             value=False,
             description=ineq_string(A,b,i),
             disabled=False,
             indent=False
-        ) for i in range(m)
+        ) for i in range(len(A))
     ]
     def face_output(face_num):
         num_vxs_in_face=len(poly.face_vxs[face_num])
