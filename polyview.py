@@ -241,90 +241,40 @@ def setup_poly_viewer(A,b,*args,**kwargs):
         poly=Polyhedron(A,b,enclose_factor=kwargs["enclose_factor"])
     else:
         poly=Polyhedron(A,b)
-    out=widgets.Output(layout={'border':'6px solid LightSteelBlue','width': '90%', 
-                'height': '60px',})
     fig=plot_poly(poly,face_traces=True,ineq_planes=True,**kwargs)
-    fig_widget=go.FigureWidget(fig)
-    #m,n=poly.m,poly.n
-    buttons=[
-        widgets.Checkbox(
-            value=False,
-            description=ineq_string(A,b,i),
-            disabled=False,
-            indent=False
-        ) for i in range(len(A))
-    ]
-    def face_output(face_num):
-        num_vxs_in_face=len(poly.face_vxs[face_num])
-        if num_vxs_in_face==0:
-            return "empty intersection"
-        if num_vxs_in_face==1:
-            return "vertex intersection"
-        if num_vxs_in_face==2:
-            return "edge intersection"
-        if num_vxs_in_face>=3:
-            return "facet intersection"
+    none_button=dict(method='restyle',
+                     label="none",
+                     visible=True,
+                     )
+    buttons=[none_button]
+    ineq_trace_numbers=[]
+    for i,trace in enumerate(fig.data):
+        if trace.name is not None and trace.name.startswith("plane_"):
+            ineq_index=int(trace.name[6:])
+            button = dict(method='restyle',
+                          label=ineq_string(A,b,ineq_index),
+                          visible=True,
+                          args=[{'visible':True}, [i]],
+                          args2 = [{'visible': False}, [i]],
+                         )
+            buttons.append(button)
+            ineq_trace_numbers.append(i)
+    none_button["args"]=[{"visible":False}, ineq_trace_numbers]
 
-    def on_check_factory(ineq_num):
-        def on_check(event):
-            with fig_widget.batch_update():
-                for trace in fig_widget.data:
-                    if show_planes:
-                        if trace.name[:5]=="plane":
-                            if int(trace.name[6:])==ineq_num:
-                                trace.update(visible=event.new)
-                    else:
-                        if trace.name[:4]=="face":
-                            if int(trace.name[5:])==ineq_num:
-                                trace.update(visible=event.new)
-            out.clear_output()
-            with out:
-                if event.new:
-                    print("inequality {} selected".format(ineq_num))
-                    print(face_output(ineq_num))
-                else:
-                    print("no inequality selected")
-        return on_check
-
-    for i,button in enumerate(buttons):
-        button.observe(on_check_factory(i),"value")
-        
-    toggle_button=widgets.ToggleButton(
-        value=False,
-        description='full plane',
-        disabled=False,
-        button_style='', # 'success', 'info', 'warning', 'danger' or ''
-        tooltip='toggles between full plan or intersection with polytope',
-        #icon='check' # (FontAwesome names without the `fa-` prefix)
+    fig.update_layout(
+        updatemenus=[
+            dict(
+                type='buttons',
+                direction='down',
+                showactive=False,
+                buttons=buttons,
+                #bgcolor="lightpink",
+                bordercolor="darkslategray"
+            )
+        ],
+        title_text="Click to show inequalities"
     )
-    show_planes=False
-
-    def reset_all():
-        with fig_widget.batch_update():
-            for trace in fig_widget.data:
-                if trace.name[:5]=="plane" or trace.name[:4]=="face":
-                    trace.update(visible=False)
-        for btn in buttons:
-            btn.value=False
-    
-    def toggle_action(event):
-        nonlocal show_planes
-        show_planes=event.new
-        reset_all()
-    
-    toggle_button.observe(toggle_action,"value")
-
-    explainer=widgets.HTML(
-        value="Select inequalities to highlight intersection",
-        placeholder='Some HTML',
-        #description='Some HTML',
-    )    
-    vbox=widgets.VBox([explainer]+[toggle_button]+buttons+[out])
-    hbox=widgets.HBox([fig_widget,vbox])
-    with out:
-        print("no inequality selected")
-
-    return hbox    
+    fig.show()
 
 
 class Display_State:
