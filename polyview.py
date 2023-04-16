@@ -272,6 +272,13 @@ def setup_poly_viewer(A,b,*args,**kwargs):
                 bordercolor="darkslategray"
             )
         ],
+        margin=dict(
+            l=150,
+            r=10,
+            b=50,
+            t=50,
+            pad=4
+        ),
         title_text="Click to show inequalities"
     )
     fig.show()
