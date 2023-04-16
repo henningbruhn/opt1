@@ -14,6 +14,7 @@ class Polyhedron:
         b=np.array(b).reshape(-1,1)
         self.A=A
         self.b=b
+        self.num_ineqs,_=self.A.shape
         self.eps=eps
         if enclose_factor>0:
             upper_bounds_A=np.eye(3)
@@ -159,7 +160,7 @@ def compute_affine_basis(a,beta,scale=1000):
     return np.array([x+scale*u,x+scale*w,x-scale*(u+w)])
 
 def setup_ineq_planes(fig,poly,color="lightpink"):
-    for i in range(poly.m):
+    for i in range(poly.num_ineqs):
         B=compute_affine_basis(poly.A[i],poly.b.flatten()[i])
         fig.add_trace(go.Mesh3d(x=B[:,0],y=B[:,1],z=B[:,2],color=color,hoverinfo="skip",
                             opacity=0.5,flatshading=True,i=[0],j=[1],k=[2],visible=False,name="plane_"+str(i)))
@@ -201,9 +202,9 @@ def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_plane
                 pad=4
             ),
     )
-    fig.add_trace(go.Scatter3d(x=poly.vertices[:,0],y=poly.vertices[:,1],z=poly.vertices[:,2],mode="markers",text=text))
-    for edge in poly.edges:
-        fig.add_trace(go.Scatter3d(x=edge[:,0],y=edge[:,1],z=edge[:,2],marker=dict(size=0), line=dict(width=5,color="blue"),hoverinfo="skip"))
+    fig.add_trace(go.Scatter3d(x=poly.vertices[:,0],y=poly.vertices[:,1],z=poly.vertices[:,2],mode="markers",text=text,name="vertices"))
+    for i,edge in enumerate(poly.edges):
+        fig.add_trace(go.Scatter3d(x=edge[:,0],y=edge[:,1],z=edge[:,2],marker=dict(size=0), line=dict(width=5,color="blue"),hoverinfo="skip",name="edge_"+str(i)))
     if opt_path is not None:
         plot_opt_path(fig,opt_path)
     colour_face(fig,poly.vertices,color="lightblue",name="whole_poly")
