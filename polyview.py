@@ -179,7 +179,7 @@ def plot_opt_path(fig,opt_path):
         
 def plot_poly(poly,objective_vec=None,opt_path=None,face_traces=False,ineq_planes=False,**kwargs):
     if objective_vec is not None:
-        text=objective_text(vxs,objective_vec)
+        text=objective_text(poly.vertices,objective_vec)
     else:
         text=None
     fig = go.Figure()
@@ -283,107 +283,107 @@ def setup_poly_viewer(A,b,*args,**kwargs):
     )
     fig.show()
 
+#################  code for simplex visualisation #############################
 
-class Display_State:
-    def __init__(self,smplx,fig_widget,output,face_highlighting=True):
-        self.simplex=smplx
-        self.step_num=-1
-        self.max_step_num=len(self.simplex.record)
-        self.widget=fig_widget
-        self.out=output
-        self.forward_button=widgets.Button(icon="forward")
-        self.backward_button=widgets.Button(icon="backward",disabled=True)
-        self.forward_button.on_click(self.forward_func())
-        self.backward_button.on_click(self.backward_func())
-        self.do_face_highlighting=face_highlighting
-        
-    def complete_y(self,y_J,J):
-        m=self.simplex.m
-        y=np.zeros(m)
-        y[J]=y_J
-        return y
-    
-    def print_state(self):
-        self.out.clear_output()
-        with self.out:
-            print("Step number: {}".format(self.step_num))
-            state=self.simplex.record[self.step_num]
-            print("J={}".format(state.J))
-            print("x={}".format(list_str(state.x)))
-            print("objective value={}".format(round(state.objective,2)))
-            y=self.complete_y(state.y_J,state.J)
-            print("y={}".format(list_str(y)))
-            if state.opt_status!="OPT found":
-                print("i | j*= {} | {}".format(state.i,state.jstar))  
-            else:
-                print("optimum reached")
+def set_trace_visibility(opt_path_step,trace,smplx,mark_faces=False):
+    if trace.name is None:
+        return True
+    if trace.name=="start_vx":
+        return True
+    if trace.name.startswith("opt_path_"):
+        return int(trace.name[9:]) < opt_path_step
+    if mark_faces:
+        if trace.name.startswith("face_"):
+            J=smplx.record[opt_path_step].J
+            return int(trace.name[5:]) in J
+        if trace.visible is None:
+            return True
+    if trace.visible is None:
+        return True
+    return trace.visible
 
-    def update_path(self):
-        with self.widget.batch_update():
-            for trace in self.widget.data:
-                if trace.name[:8]=="opt_path":
-                    if int(trace.name[9:])<self.step_num:
-                        trace.update(visible=True)
-                    else:
-                        trace.update(visible=False)
-            if self.do_face_highlighting:
-                self.update_face_highlighting()
-                        
-    def update_face_highlighting(self):
-        state=self.simplex.record[self.step_num]
-        J=state.J
-        with self.widget.batch_update():
-            for trace in self.widget.data:
-                if trace.name[:4]=="face":
-                    if int(trace.name[5:]) in J:
-                        trace.update(visible=True)
-                    else:
-                        trace.update(visible=False)
+def complete_y(smplx,opt_path_step):
+    m=smplx.m
+    y=np.zeros(m)
+    J=smplx.record[opt_path_step].J
+    y[J]=smplx.record[opt_path_step].y_J
+    return y
 
-    def update_button_disable(self):
-        if self.step_num==self.max_step_num-1:
-            self.forward_button.disabled=True
-        if self.step_num>0:
-            self.backward_button.disabled=False
-        
-                        
-    def forward_func(self):
-        def forward(button):
-            if self.step_num<self.max_step_num-1:
-                self.step_num+=1
-                self.print_state()
-                self.update_path()
-            self.update_button_disable()
-        return forward
-            
-    def backward_func(self):
-        def backward(button):
-            if self.step_num>0:
-                self.forward_button.disabled=False
-                self.step_num-=1
-                self.print_state()
-                self.update_path()
-            self.update_button_disable()
-        return backward
-    
+def state_string(smplx,opt_path_step):
+    state=smplx.record[opt_path_step]
+    result=""
+    result+="Current state of simplex"+"<br>"
+    result+="J={}".format(state.J)+"<br>"
+    result+="x={}".format(list_str(state.x))+"<br>"
+    result+="objective value={}".format(round(state.objective,2))+"<br>"
+    result+="y={}".format(list_str(complete_y(smplx,opt_path_step)))+"<br>"
+    if state.opt_status!="OPT found":
+        result+="i={}  j*={}".format(state.i,state.jstar)  
+    else:
+        result+="optimum reached"
+    return result
+
+def set_visibility(fig,opt_path_step,smplx,mark_faces=False):
+    return [set_trace_visibility(opt_path_step,trace,smplx,mark_faces=mark_faces) for trace in fig.data]
+
+def setup_annotations_dict(smplx,opt_path_step):
+    annotation = go.layout.Annotation(
+        text=state_string(smplx,opt_path_step),
+        y=1,
+        x=1.2,
+        yref="paper",
+        xref="paper",
+        xanchor="right",
+        yanchor="top",
+        font=dict(color='black', size=14),
+        showarrow=False,
+        align="left",
+        bgcolor="LightSteelBlue",
+        bordercolor="darkslategray",
+        borderwidth=2,
+    )
+    return [annotation]
+
 def setup_simplex_widget(A,b,c,x0):
     poly=Polyhedron(A,b)
-
     smplx=simplex.Simplex(A,b,c,x0,verbose=True)
     opt_path=get_path(smplx)    
-    out=widgets.Output(layout={'border':'6px solid LightSteelBlue','width': '90%', 
-                'height': '160px',})
+    fig=plot_poly(poly,opt_path=opt_path,face_traces=True,objective_vec=c)
 
-    fig=plot_poly(poly,opt_path=opt_path,face_traces=True)
-    fig_widget=go.FigureWidget(fig)
+    steps = []
+    for i in range(len(opt_path)):
+        step = dict(
+            method="update",
+            args=[{"visible": set_visibility(fig,i,smplx,mark_faces=True)},         
+                  {"title": "Simplex step number: " + str(i),
+                   "annotations": setup_annotations_dict(smplx,i)}],  # layout attribute
+            value=i,
+            label=str(i),
+        )
+        steps.append(step)
 
-    dstate=Display_State(smplx,fig_widget,out)
-    forward=dstate.forward_button
-    backward=dstate.backward_button
-    button_box=widgets.HBox([backward,forward])
-    vbox=widgets.VBox([button_box,out])
-    hbox=widgets.HBox([fig_widget,vbox])
-    with out:
-        print("Click buttons to perform simplex step")
+    sliders = [dict(
+        active=0,
+        currentvalue={"prefix": "Simplex step: "},
+        pad={"t": 50},
+        steps=steps
+    )]    
 
-    return hbox
+    # simulate action of slider step 0
+    for trace,visible in zip(fig.data,steps[0]['args'][0]['visible']):
+        trace.update(visible=visible)
+
+    fig.update_layout(
+        sliders=sliders,
+        margin=dict(
+        l=10,
+        r=150,
+        b=50,
+        t=50,
+        pad=4
+        ),
+        annotations=setup_annotations_dict(smplx,0),
+        title="Simplex step number: 0",
+    )
+
+    fig.show() 

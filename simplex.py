@@ -220,8 +220,8 @@ def dodecahedron():
             generator.append(generator.pop(0))
     A=np.vstack(ineqs)
     b=np.ones(len(A)).reshape(-1,1)
-    c=np.ones(3).reshape(-1,1)
-    x0=-np.array([1-1/phi]*3).reshape(-1,1)
+    x0=np.array([-1/phi**3,0,1-phi])
+    c=np.array([0,0,1]).reshape(-1,1)
     return A,b,c,x0
 
 def octahedron():
