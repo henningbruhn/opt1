@@ -10,7 +10,7 @@ import simplex
 
 class Polyhedron:
     def __init__(self,A,b,enclose_factor=1000,eps=1E-8):
-        A=np.array(A)
+        A=np.array(A) 
         b=np.array(b).reshape(-1,1)
         self.A=A
         self.b=b
@@ -242,6 +242,9 @@ def setup_poly_viewer(A,b,*args,**kwargs):
     else:
         poly=Polyhedron(A,b)
     fig=plot_poly(poly,face_traces=True,ineq_planes=True,**kwargs)
+    if "red_points" in kwargs:
+        red_points=np.array(kwargs["red_points"])
+        fig.add_trace(go.Scatter3d(x=red_points[:,0],y=red_points[:,1],z=red_points[:,2],mode="markers",name="red points",marker=dict(color="red")))
     none_button=dict(method='restyle',
                      label="none",
                      visible=True,
